@@ -1,0 +1,93 @@
+flowchart TB
+    subgraph "Client Applications"
+        A[Web Dashboard]
+        B[Mobile App]
+        C[Third-party Integrations]
+        D[CLI Tools]
+    end
+    
+    subgraph "API Gateway"
+        E[Nginx/HAProxy]
+    end
+    
+    subgraph "FastAPI Application"
+        F[API Routes]
+        G[Middleware Layer]
+        H[Request ID Middleware]
+        I[Rate Limiting]
+        J[CORS Handler]
+        K[Error Handler]
+    end
+    
+    subgraph "Core Business Logic"
+        L[Memory Store]
+        M[Retrieval Engine]
+        N[Consolidation Engine]
+        O[Embeddings Facade]
+    end
+    
+    subgraph "Provider Layer"
+        P[Local Embeddings]
+        Q[OpenAI Embeddings]
+        R[Google Embeddings]
+        S[Anthropic LLM]
+        T[OpenAI LLM]
+        U[Google LLM]
+    end
+    
+    subgraph "Storage Layer"
+        V[PostgreSQL]
+        W[ChromaDB]
+        X[Pinecone]
+        Y[Redis Cache]
+    end
+    
+    subgraph "Infrastructure"
+        Z[Load Balancer]
+        AA[Container Orchestrator]
+        BB[Monitoring Stack]
+        CC[Log Aggregation]
+    end
+    
+    A --> E
+    B --> E
+    C --> E
+    D --> E
+    E --> F
+    F --> G
+    G --> H
+    G --> I
+    G --> J
+    G --> K
+    F --> L
+    L --> M
+    L --> N
+    L --> O
+    O --> P
+    O --> Q
+    O --> R
+    L --> S
+    L --> T
+    L --> U
+    L --> V
+    M --> W
+    M --> X
+    I --> Y
+    L --> Y
+    Z --> E
+    AA --> Z
+    BB --> F
+    CC --> F
+    
+    style A fill:#e1f5fe
+    style B fill:#e1f5fe
+    style C fill:#e1f5fe
+    style D fill:#e1f5fe
+    style L fill:#f3e5f5
+    style M fill:#f3e5f5
+    style N fill:#f3e5f5
+    style O fill:#f3e5f5
+    style V fill:#e8f5e8
+    style W fill:#e8f5e8
+    style X fill:#e8f5e8
+    style Y fill:#e8f5e8

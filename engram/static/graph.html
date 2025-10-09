@@ -1,0 +1,529 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Engram Knowledge Graph</title>
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            padding: 20px;
+        }
+        
+        h1 {
+            color: #333;
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        
+        .controls {
+            margin-bottom: 20px;
+            display: flex;
+            gap: 15px;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+        
+        .control-group {
+            display: flex;
+            flex-direction: column;
+            gap: 5px;
+        }
+        
+        label {
+            font-weight: bold;
+            color: #555;
+        }
+        
+        input, select, button {
+            padding: 8px 12px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 14px;
+        }
+        
+        button {
+            background-color: #007bff;
+            color: white;
+            border: none;
+            cursor: pointer;
+            transition: background-color 0.3s;
+        }
+        
+        button:hover {
+            background-color: #0056b3;
+        }
+        
+        button:disabled {
+            background-color: #ccc;
+            cursor: not-allowed;
+        }
+        
+        #graph {
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            background: white;
+            min-height: 600px;
+        }
+        
+        .node {
+            stroke: #fff;
+            stroke-width: 2px;
+            cursor: pointer;
+        }
+        
+        .node:hover {
+            stroke-width: 3px;
+        }
+        
+        .link {
+            stroke: #999;
+            stroke-opacity: 0.6;
+            stroke-width: 1px;
+        }
+        
+        .node-label {
+            font-size: 12px;
+            fill: #333;
+            text-anchor: middle;
+            pointer-events: none;
+        }
+        
+        .link-label {
+            font-size: 10px;
+            fill: #666;
+            text-anchor: middle;
+            pointer-events: none;
+        }
+        
+        .legend {
+            margin-top: 20px;
+            padding: 15px;
+            background-color: #f8f9fa;
+            border-radius: 4px;
+        }
+        
+        .legend h3 {
+            margin-top: 0;
+            color: #333;
+        }
+        
+        .legend-item {
+            display: inline-block;
+            margin-right: 20px;
+            margin-bottom: 10px;
+        }
+        
+        .legend-color {
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
+            margin-right: 8px;
+            vertical-align: middle;
+        }
+        
+        .loading {
+            text-align: center;
+            padding: 40px;
+            color: #666;
+        }
+        
+        .error {
+            color: #dc3545;
+            background-color: #f8d7da;
+            border: 1px solid #f5c6cb;
+            padding: 15px;
+            border-radius: 4px;
+            margin: 20px 0;
+        }
+        
+        .stats {
+            display: flex;
+            gap: 20px;
+            margin-bottom: 20px;
+            padding: 15px;
+            background-color: #f8f9fa;
+            border-radius: 4px;
+        }
+        
+        .stat-item {
+            text-align: center;
+        }
+        
+        .stat-value {
+            font-size: 24px;
+            font-weight: bold;
+            color: #007bff;
+        }
+        
+        .stat-label {
+            font-size: 12px;
+            color: #666;
+            text-transform: uppercase;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🧠 Engram Knowledge Graph</h1>
+        
+        <div class="controls">
+            <div class="control-group">
+                <label for="tenant-id">Tenant ID:</label>
+                <input type="text" id="tenant-id" placeholder="Enter tenant ID" value="demo-tenant">
+            </div>
+            
+            <div class="control-group">
+                <label for="user-id">User ID:</label>
+                <input type="text" id="user-id" placeholder="Enter user ID" value="demo-user">
+            </div>
+            
+            <div class="control-group">
+                <label for="seed-label">Seed Label (optional):</label>
+                <input type="text" id="seed-label" placeholder="Enter seed node label">
+            </div>
+            
+            <div class="control-group">
+                <label for="radius">Radius:</label>
+                <select id="radius">
+                    <option value="1">1</option>
+                    <option value="2" selected>2</option>
+                    <option value="3">3</option>
+                </select>
+            </div>
+            
+            <div class="control-group">
+                <label for="max-nodes">Max Nodes:</label>
+                <select id="max-nodes">
+                    <option value="50">50</option>
+                    <option value="100" selected>100</option>
+                    <option value="200">200</option>
+                </select>
+            </div>
+            
+            <button onclick="loadGraph()">Load Graph</button>
+            <button onclick="clearGraph()">Clear</button>
+        </div>
+        
+        <div class="stats" id="stats" style="display: none;">
+            <div class="stat-item">
+                <div class="stat-value" id="node-count">0</div>
+                <div class="stat-label">Nodes</div>
+            </div>
+            <div class="stat-item">
+                <div class="stat-value" id="edge-count">0</div>
+                <div class="stat-label">Edges</div>
+            </div>
+            <div class="stat-item">
+                <div class="stat-value" id="radius-value">0</div>
+                <div class="stat-label">Radius</div>
+            </div>
+        </div>
+        
+        <div id="graph"></div>
+        
+        <div class="legend">
+            <h3>Node Types</h3>
+            <div class="legend-item">
+                <span class="legend-color" style="background-color: #1f77b4;"></span>
+                <span>Person</span>
+            </div>
+            <div class="legend-item">
+                <span class="legend-color" style="background-color: #ff7f0e;"></span>
+                <span>Organization</span>
+            </div>
+            <div class="legend-item">
+                <span class="legend-color" style="background-color: #2ca02c;"></span>
+                <span>Location</span>
+            </div>
+            <div class="legend-item">
+                <span class="legend-color" style="background-color: #d62728;"></span>
+                <span>Product</span>
+            </div>
+            <div class="legend-item">
+                <span class="legend-color" style="background-color: #9467bd;"></span>
+                <span>Event</span>
+            </div>
+            <div class="legend-item">
+                <span class="legend-color" style="background-color: #8c564b;"></span>
+                <span>Entity</span>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let svg, simulation;
+        let currentData = { nodes: [], links: [] };
+        
+        const nodeTypeColors = {
+            'person': '#1f77b4',
+            'organization': '#ff7f0e',
+            'location': '#2ca02c',
+            'product': '#d62728',
+            'event': '#9467bd',
+            'facility': '#17becf',
+            'work': '#bcbd22',
+            'law': '#e377c2',
+            'language': '#7f7f7f',
+            'date': '#8c564b',
+            'time': '#c5b0d5',
+            'money': '#c49c94',
+            'percentage': '#f7b6d3',
+            'quantity': '#c7c7c7',
+            'ordinal': '#dbdb8d',
+            'cardinal': '#9edae5',
+            'entity': '#8c564b'
+        };
+        
+        function getNodeColor(type) {
+            return nodeTypeColors[type] || nodeTypeColors['entity'];
+        }
+        
+        function initializeGraph() {
+            const width = document.getElementById('graph').clientWidth;
+            const height = 600;
+            
+            svg = d3.select("#graph")
+                .append("svg")
+                .attr("width", width)
+                .attr("height", height);
+            
+            simulation = d3.forceSimulation()
+                .force("link", d3.forceLink().id(d => d.id).distance(100))
+                .force("charge", d3.forceManyBody().strength(-300))
+                .force("center", d3.forceCenter(width / 2, height / 2))
+                .force("collision", d3.forceCollide().radius(20));
+        }
+        
+        function loadGraph() {
+            const tenantId = document.getElementById('tenant-id').value.trim();
+            const userId = document.getElementById('user-id').value.trim();
+            const seedLabel = document.getElementById('seed-label').value.trim();
+            const radius = parseInt(document.getElementById('radius').value);
+            const maxNodes = parseInt(document.getElementById('max-nodes').value);
+            
+            if (!tenantId || !userId) {
+                alert('Please enter both Tenant ID and User ID');
+                return;
+            }
+            
+            showLoading();
+            
+            // Build query parameters
+            const params = new URLSearchParams({
+                tenant_id: tenantId,
+                user_id: userId,
+                radius: radius,
+                max_nodes: maxNodes
+            });
+            
+            if (seedLabel) {
+                params.append('seed_label', seedLabel);
+            }
+            
+            fetch(`/v1/graph/subgraph/d3?${params}`)
+                .then(response => {
+                    if (!response.ok) {
+                        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                    }
+                    return response.json();
+                })
+                .then(data => {
+                    currentData = data;
+                    updateGraph();
+                    updateStats(data);
+                    hideLoading();
+                })
+                .catch(error => {
+                    hideLoading();
+                    showError(`Failed to load graph: ${error.message}`);
+                });
+        }
+        
+        function updateGraph() {
+            if (!svg) {
+                initializeGraph();
+            }
+            
+            // Clear existing content
+            svg.selectAll("*").remove();
+            
+            if (currentData.nodes.length === 0) {
+                svg.append("text")
+                    .attr("x", svg.attr("width") / 2)
+                    .attr("y", svg.attr("height") / 2)
+                    .attr("text-anchor", "middle")
+                    .style("font-size", "16px")
+                    .style("fill", "#666")
+                    .text("No graph data available. Try loading some content first.");
+                return;
+            }
+            
+            // Create links
+            const link = svg.append("g")
+                .selectAll("line")
+                .data(currentData.links)
+                .enter().append("line")
+                .attr("class", "link")
+                .style("stroke", "#999")
+                .style("stroke-opacity", 0.6)
+                .style("stroke-width", d => Math.sqrt(d.weight || 1));
+            
+            // Create link labels
+            const linkLabels = svg.append("g")
+                .selectAll("text")
+                .data(currentData.links)
+                .enter().append("text")
+                .attr("class", "link-label")
+                .text(d => d.relation)
+                .style("font-size", "10px")
+                .style("fill", "#666");
+            
+            // Create nodes
+            const node = svg.append("g")
+                .selectAll("circle")
+                .data(currentData.nodes)
+                .enter().append("circle")
+                .attr("class", "node")
+                .attr("r", d => Math.max(5, Math.min(20, d.degree || 1)))
+                .style("fill", d => getNodeColor(d.type))
+                .call(d3.drag()
+                    .on("start", dragstarted)
+                    .on("drag", dragged)
+                    .on("end", dragended));
+            
+            // Create node labels
+            const nodeLabels = svg.append("g")
+                .selectAll("text")
+                .data(currentData.nodes)
+                .enter().append("text")
+                .attr("class", "node-label")
+                .text(d => d.label)
+                .style("font-size", "12px")
+                .style("fill", "#333");
+            
+            // Add tooltips
+            node.append("title")
+                .text(d => `${d.label}\nType: ${d.type}\nDegree: ${d.degree || 0}`);
+            
+            // Update simulation
+            simulation.nodes(currentData.nodes);
+            simulation.force("link").links(currentData.links);
+            simulation.alpha(0.3).restart();
+            
+            // Update positions on tick
+            simulation.on("tick", () => {
+                link
+                    .attr("x1", d => d.source.x)
+                    .attr("y1", d => d.source.y)
+                    .attr("x2", d => d.target.x)
+                    .attr("y2", d => d.target.y);
+                
+                linkLabels
+                    .attr("x", d => (d.source.x + d.target.x) / 2)
+                    .attr("y", d => (d.source.y + d.target.y) / 2);
+                
+                node
+                    .attr("cx", d => d.x)
+                    .attr("cy", d => d.y);
+                
+                nodeLabels
+                    .attr("x", d => d.x)
+                    .attr("y", d => d.y + 5);
+            });
+        }
+        
+        function updateStats(data) {
+            document.getElementById('stats').style.display = 'flex';
+            document.getElementById('node-count').textContent = data.nodes.length;
+            document.getElementById('edge-count').textContent = data.links.length;
+            document.getElementById('radius-value').textContent = data.metadata?.radius || 0;
+        }
+        
+        function clearGraph() {
+            currentData = { nodes: [], links: [] };
+            if (svg) {
+                svg.selectAll("*").remove();
+            }
+            document.getElementById('stats').style.display = 'none';
+        }
+        
+        function showLoading() {
+            if (!svg) {
+                initializeGraph();
+            }
+            svg.selectAll("*").remove();
+            svg.append("text")
+                .attr("x", svg.attr("width") / 2)
+                .attr("y", svg.attr("height") / 2)
+                .attr("text-anchor", "middle")
+                .style("font-size", "16px")
+                .style("fill", "#007bff")
+                .text("Loading graph...");
+        }
+        
+        function hideLoading() {
+            // Loading will be hidden when graph is updated
+        }
+        
+        function showError(message) {
+            const container = document.querySelector('.container');
+            const existingError = container.querySelector('.error');
+            if (existingError) {
+                existingError.remove();
+            }
+            
+            const errorDiv = document.createElement('div');
+            errorDiv.className = 'error';
+            errorDiv.textContent = message;
+            container.insertBefore(errorDiv, container.querySelector('#graph'));
+        }
+        
+        // Drag functions
+        function dragstarted(event, d) {
+            if (!event.active) simulation.alphaTarget(0.3).restart();
+            d.fx = d.x;
+            d.fy = d.y;
+        }
+        
+        function dragged(event, d) {
+            d.fx = event.x;
+            d.fy = event.y;
+        }
+        
+        function dragended(event, d) {
+            if (!event.active) simulation.alphaTarget(0);
+            d.fx = null;
+            d.fy = null;
+        }
+        
+        // Handle window resize
+        window.addEventListener('resize', () => {
+            if (svg && currentData.nodes.length > 0) {
+                const width = document.getElementById('graph').clientWidth;
+                svg.attr("width", width);
+                simulation.force("center", d3.forceCenter(width / 2, 300));
+                simulation.alpha(0.3).restart();
+            }
+        });
+        
+        // Initialize on page load
+        document.addEventListener('DOMContentLoaded', () => {
+            initializeGraph();
+        });
+    </script>
+</body>
+</html>
