@@ -64,19 +64,19 @@ export function ChatWindow({ className }: ChatWindowProps) {
   // Chat mutation
   const chatMutation = useMutation({
     mutationFn: async (userMessage: string) => {
-      const chatMessages: Message[] = [
+      const chatMessages = [
         ...messages,
         { role: 'user', content: userMessage }
       ];
       
       return api.chat({
+        tenant_id: tenantId || '',
+        user_id: userId || '',
         messages: chatMessages,
         retrieval_hints: {
           modalities: retrievalSettings.modalities.length > 0 ? retrievalSettings.modalities : undefined,
           k: retrievalSettings.k,
-          filters: {},
         },
-        temperature: 0.7,
       });
     },
     onSuccess: (response) => {
@@ -84,17 +84,17 @@ export function ChatWindow({ className }: ChatWindowProps) {
       addMessage({ role: 'user', content: inputMessage });
       
       // Add assistant response with streaming effect
-      const assistantMessage: Message = { role: 'assistant', content: '' };
+      const assistantMessage = { role: 'assistant', content: '' };
       addMessage(assistantMessage);
       
       // Simulate streaming
       let currentText = '';
-      const words = response.output.split(' ');
+      const words = response.data?.message.content.split(' ') || [];
       
       const streamInterval = setInterval(() => {
         if (words.length === 0) {
           clearInterval(streamInterval);
-          setContext(response.memories_used);
+          setContext(response.data?.memories_used || []);
           setIsLoading(false);
           return;
         }

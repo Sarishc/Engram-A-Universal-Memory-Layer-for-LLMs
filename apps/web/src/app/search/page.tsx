@@ -53,25 +53,27 @@ export default function SearchPage() {
 
   // Search query
   const { data: searchResults, isLoading, error } = useQuery({
-    queryKey: queryKeys.memories({
+    queryKey: queryKeys.memorySearch({
+      tenant_id: tenantId || '',
+      user_id: userId || '',
       query,
       filters,
-      tenant_id: tenantId,
-      user_id: userId,
     }),
-    queryFn: () => api.retrieve({
+    queryFn: () => api.searchMemories({
+      tenant_id: tenantId || '',
+      user_id: userId || '',
       query,
       top_k: 50,
       modalities: filters.modalities.length > 0 ? filters.modalities : undefined,
       filters: {
-        modalities: filters.modalities.length > 0 ? filters.modalities : undefined,
         tags: filters.tags.length > 0 ? filters.tags : undefined,
-        importance_min: filters.importanceMin,
-        date_range: filters.dateRange ? {
-          start: filters.dateRange.start.toISOString(),
-          end: filters.dateRange.end.toISOString(),
-        } : undefined,
+        source_uri: filters.sources.length > 0 ? filters.sources[0] : undefined,
       },
+      date_range: filters.dateRange ? {
+        start: filters.dateRange.start.toISOString(),
+        end: filters.dateRange.end.toISOString(),
+      } : undefined,
+      importance_threshold: filters.importanceMin,
     }),
     enabled: !!query.trim() && !!tenantId,
   });

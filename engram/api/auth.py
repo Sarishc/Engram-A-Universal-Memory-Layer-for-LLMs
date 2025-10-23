@@ -261,4 +261,4 @@ class ApiKeyManager:
         Returns:
             Dict mapping scope names to descriptions
         """
-        return SCOPES.copy()
+        return SCOPES.copy() 

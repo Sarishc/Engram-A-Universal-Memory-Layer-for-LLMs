@@ -136,3 +136,73 @@ class StatsResponse(BaseModel):
     active_memories: int = Field(..., description="Number of active memories")
     vector_provider: str = Field(..., description="Vector database provider")
     embeddings_provider: str = Field(..., description="Embeddings provider")
+
+
+class MemorySearchRequest(BaseModel):
+    """Request model for advanced memory search."""
+    
+    tenant_id: str = Field(..., description="Tenant ID")
+    user_id: str = Field(..., description="User ID")
+    query: str = Field(..., min_length=1, max_length=1000, description="Search query")
+    top_k: Optional[int] = Field(10, ge=1, le=50, description="Number of results to return")
+    filters: Optional[Dict[str, Any]] = Field(None, description="Search filters")
+    modalities: Optional[List[str]] = Field(None, description="Content modalities to search")
+    date_range: Optional[Dict[str, str]] = Field(None, description="Date range filter")
+    importance_threshold: Optional[float] = Field(None, ge=0.0, le=1.0, description="Minimum importance score")
+
+
+class MemorySearchResponse(BaseModel):
+    """Response model for memory search."""
+    
+    memories: List[RetrieveResult] = Field(..., description="Search results")
+    total_found: int = Field(..., description="Total number of results found")
+    query: str = Field(..., description="Search query")
+    filters_applied: Dict[str, Any] = Field(..., description="Applied filters")
+
+
+class MemoryAskRequest(BaseModel):
+    """Request model for asking questions with memory context."""
+    
+    tenant_id: str = Field(..., description="Tenant ID")
+    user_id: str = Field(..., description="User ID")
+    question: str = Field(..., min_length=1, max_length=1000, description="Question to ask")
+    max_memories: Optional[int] = Field(10, ge=1, le=20, description="Maximum memories to use")
+    include_sources: Optional[bool] = Field(True, description="Include source information")
+
+
+class MemoryAskResponse(BaseModel):
+    """Response model for memory-based Q&A."""
+    
+    answer: str = Field(..., description="AI-generated answer")
+    sources_used: List[RetrieveResult] = Field(..., description="Memories used for the answer")
+    confidence: float = Field(..., ge=0.0, le=1.0, description="Answer confidence score")
+    query: str = Field(..., description="Original question")
+
+
+class ProcessingStatusRequest(BaseModel):
+    """Request model for processing status."""
+    
+    job_id: str = Field(..., description="Job ID")
+
+
+class ProcessingStatusResponse(BaseModel):
+    """Response model for processing status."""
+    
+    job_id: str = Field(..., description="Job ID")
+    status: str = Field(..., description="Job status")
+    progress: int = Field(..., ge=0, le=100, description="Progress percentage")
+    message: str = Field(..., description="Status message")
+    result: Optional[Dict[str, Any]] = Field(None, description="Job result if completed")
+    error: Optional[str] = Field(None, description="Error message if failed")
+
+
+class AnalyticsOverviewResponse(BaseModel):
+    """Response model for analytics overview."""
+    
+    total_memories: int = Field(..., description="Total memories")
+    total_requests: int = Field(..., description="Total API requests")
+    requests_last_24h: int = Field(..., description="Requests in last 24 hours")
+    p95_latency_ms: float = Field(..., description="95th percentile latency")
+    memory_types: Dict[str, int] = Field(..., description="Memory counts by type")
+    top_sources: List[Dict[str, Any]] = Field(..., description="Top content sources")
+    recent_activity: List[Dict[str, Any]] = Field(..., description="Recent activity")

@@ -32,8 +32,8 @@ export default function Dashboard() {
 
   // Fetch analytics data
   const { data: analytics, isLoading: analyticsLoading } = useQuery({
-    queryKey: queryKeys.analytics(tenantId || ''),
-    queryFn: () => api.analyticsOverview(tenantId || ''),
+    queryKey: queryKeys.analyticsOverview(tenantId || '', useUIStore.getState().userId || ''),
+    queryFn: () => api.analyticsOverview(tenantId || '', useUIStore.getState().userId || ''),
     enabled: !!tenantId,
   });
 

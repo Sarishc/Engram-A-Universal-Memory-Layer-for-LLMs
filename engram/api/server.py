@@ -18,6 +18,7 @@ from engram.api.router_routes import router as router_router
 from engram.api.processing_routes import router as processing_router
 from engram.api.analytics_routes import router as analytics_router
 from engram.api.connector_routes import router as connector_router
+from engram.api.memory_routes import router as memory_router
 from engram.utils.config import get_settings
 from engram.utils.logger import get_logger
 
@@ -77,6 +78,7 @@ app.include_router(router_router, prefix=settings.api_v1_str)
 app.include_router(processing_router, prefix=settings.api_v1_str)
 app.include_router(analytics_router, prefix=settings.api_v1_str)
 app.include_router(connector_router, prefix=settings.api_v1_str)
+app.include_router(memory_router, prefix=settings.api_v1_str)
 
 
 @app.get("/", tags=["root"])

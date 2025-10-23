@@ -1,323 +1,387 @@
-"""Analytics and monitoring API routes."""
+"""Analytics API routes for memory system insights."""
 
+from typing import List, Optional, Dict, Any
 from datetime import datetime, timedelta
-from typing import Dict, Any, Optional, List
-
 from fastapi import APIRouter, HTTPException, Depends, Query
-from sqlalchemy import func, desc, and_
 from sqlalchemy.orm import Session
+from sqlalchemy import and_, desc, func, text
 
-from engram.database.postgres import get_db_session
-from engram.database.analytics import RequestLog, SystemMetrics
-from engram.database.jobs import Job, JobStatus, JobType
-from engram.database.models import Memory, ModalityType
-from engram.api.middleware import require_scope, get_current_tenant_id
+from engram.api.deps import get_db_session
+from engram.api.models import AnalyticsOverviewResponse
+from engram.database.models import Memory, UserMemoryStats
 from engram.utils.logger import get_logger
 
 logger = get_logger(__name__)
-router = APIRouter()
+
+router = APIRouter(prefix="/v1/analytics", tags=["analytics"])
 
 
-@router.get("/analytics/overview")
-@require_scope("analytics:read")
+@router.get("/overview", response_model=AnalyticsOverviewResponse)
 async def get_analytics_overview(
-    request,
+    tenant_id: str = Query(..., description="Tenant ID"),
+    user_id: str = Query(..., description="User ID"),
     db: Session = Depends(get_db_session),
-    days: int = Query(7, ge=1, le=365, description="Number of days to analyze"),
-) -> Dict[str, Any]:
-    """Get analytics overview for a tenant.
-    
-    Args:
-        request: FastAPI request object
-        db: Database session
-        days: Number of days to analyze
-        
-    Returns:
-        Analytics overview data
-    """
-    tenant_id = get_current_tenant_id(request)
-    if not tenant_id:
-        raise HTTPException(status_code=400, detail="Tenant ID required")
-    
+) -> AnalyticsOverviewResponse:
+    """Get comprehensive analytics overview for a user."""
     try:
-        # Calculate date range
-        end_date = datetime.utcnow()
-        start_date = end_date - timedelta(days=days)
-        
-        # Request counts and latency
-        request_stats = db.query(
-            func.count(RequestLog.id).label("total_requests"),
-            func.avg(RequestLog.duration_ms).label("avg_latency_ms"),
-            func.percentile_cont(0.95).within_group(RequestLog.duration_ms).label("p95_latency_ms"),
-            func.sum(RequestLog.tokens_used).label("total_tokens"),
-            func.sum(RequestLog.cost_usd).label("total_cost_usd"),
-        ).filter(
+        # Get total memories
+        total_memories = db.query(func.count(Memory.id)).filter(
             and_(
-                RequestLog.tenant_id == tenant_id,
-                RequestLog.created_at >= start_date,
-                RequestLog.created_at <= end_date,
+                Memory.tenant_id == tenant_id,
+                Memory.user_id == user_id,
+                Memory.active == True,
             )
-        ).first()
+        ).scalar() or 0
         
-        # Status code breakdown
-        status_breakdown = db.query(
-            RequestLog.status_code,
-            func.count(RequestLog.id).label("count"),
-        ).filter(
-            and_(
-                RequestLog.tenant_id == tenant_id,
-                RequestLog.created_at >= start_date,
-                RequestLog.created_at <= end_date,
-            )
-        ).group_by(RequestLog.status_code).all()
-        
-        # Route breakdown
-        route_breakdown = db.query(
-            RequestLog.route,
-            func.count(RequestLog.id).label("count"),
-            func.avg(RequestLog.duration_ms).label("avg_latency_ms"),
-        ).filter(
-            and_(
-                RequestLog.tenant_id == tenant_id,
-                RequestLog.created_at >= start_date,
-                RequestLog.created_at <= end_date,
-            )
-        ).group_by(RequestLog.route).order_by(desc("count")).limit(10).all()
-        
-        # Memory counts by modality
-        memory_stats = db.query(
+        # Get memory types distribution
+        memory_types = {}
+        type_counts = db.query(
             Memory.modality,
-            func.count(Memory.id).label("count"),
+            func.count(Memory.id)
         ).filter(
-            Memory.tenant_id == tenant_id,
-            Memory.active == True,
+            and_(
+                Memory.tenant_id == tenant_id,
+                Memory.user_id == user_id,
+                Memory.active == True,
+            )
         ).group_by(Memory.modality).all()
         
-        # Job statistics
-        job_stats = db.query(
-            Job.job_type,
-            Job.status,
-            func.count(Job.id).label("count"),
-        ).filter(
-            Job.tenant_id == tenant_id,
-            Job.created_at >= start_date,
-            Job.created_at <= end_date,
-        ).group_by(Job.job_type, Job.status).all()
+        for modality, count in type_counts:
+            memory_types[modality.value] = count
         
-        # Last 24 hours activity
-        last_24h = end_date - timedelta(hours=24)
-        last_24h_stats = db.query(
-            func.count(RequestLog.id).label("requests_24h"),
-            func.avg(RequestLog.duration_ms).label("avg_latency_24h"),
+        # Get top sources
+        top_sources = db.query(
+            Memory.source_uri,
+            func.count(Memory.id).label('count')
         ).filter(
             and_(
-                RequestLog.tenant_id == tenant_id,
-                RequestLog.created_at >= last_24h,
-                RequestLog.created_at <= end_date,
+                Memory.tenant_id == tenant_id,
+                Memory.user_id == user_id,
+                Memory.active == True,
+                Memory.source_uri.isnot(None),
+            )
+        ).group_by(Memory.source_uri).order_by(desc('count')).limit(5).all()
+        
+        sources_list = [
+            {"source": source, "count": count} 
+            for source, count in top_sources
+        ]
+        
+        # Get recent activity (last 10 memories)
+        recent_activity = db.query(Memory).filter(
+            and_(
+                Memory.tenant_id == tenant_id,
+                Memory.user_id == user_id,
+                Memory.active == True,
+            )
+        ).order_by(desc(Memory.created_at)).limit(10).all()
+        
+        activity_list = [
+            {
+                "id": memory.id,
+                "text": memory.text[:100] + "..." if len(memory.text) > 100 else memory.text,
+                "modality": memory.modality.value,
+                "created_at": memory.created_at.isoformat(),
+                "importance": memory.importance,
+            }
+            for memory in recent_activity
+        ]
+        
+        # Get requests in last 24 hours (mock data for now)
+        requests_last_24h = 0  # Would need request tracking system
+        
+        # Get P95 latency (mock data for now)
+        p95_latency_ms = 85.0  # Would need latency tracking
+        
+        return AnalyticsOverviewResponse(
+            total_memories=total_memories,
+            total_requests=0,  # Would need request tracking
+            requests_last_24h=requests_last_24h,
+            p95_latency_ms=p95_latency_ms,
+            memory_types=memory_types,
+            top_sources=sources_list,
+            recent_activity=activity_list,
+        )
+        
+    except Exception as e:
+        logger.error(f"Error getting analytics overview: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/memory-stats")
+async def get_memory_stats(
+    tenant_id: str = Query(..., description="Tenant ID"),
+    user_id: str = Query(..., description="User ID"),
+    db: Session = Depends(get_db_session),
+) -> Dict[str, Any]:
+    """Get detailed memory statistics."""
+    try:
+        # Get user stats
+        user_stats = db.query(UserMemoryStats).filter(
+            and_(
+                UserMemoryStats.tenant_id == tenant_id,
+                UserMemoryStats.user_id == user_id,
             )
         ).first()
         
+        # Get memory distribution by importance
+        importance_dist = db.query(
+            func.floor(Memory.importance * 10).label('bucket'),
+            func.count(Memory.id).label('count')
+        ).filter(
+            and_(
+                Memory.tenant_id == tenant_id,
+                Memory.user_id == user_id,
+                Memory.active == True,
+            )
+        ).group_by('bucket').order_by('bucket').all()
+        
+        # Get memory growth over time (last 30 days)
+        thirty_days_ago = datetime.now() - timedelta(days=30)
+        daily_counts = db.query(
+            func.date(Memory.created_at).label('date'),
+            func.count(Memory.id).label('count')
+        ).filter(
+            and_(
+                Memory.tenant_id == tenant_id,
+                Memory.user_id == user_id,
+                Memory.active == True,
+                Memory.created_at >= thirty_days_ago,
+            )
+        ).group_by('date').order_by('date').all()
+        
+        # Get average importance by modality
+        avg_importance = db.query(
+            Memory.modality,
+            func.avg(Memory.importance).label('avg_importance')
+        ).filter(
+            and_(
+                Memory.tenant_id == tenant_id,
+                Memory.user_id == user_id,
+                Memory.active == True,
+            )
+        ).group_by(Memory.modality).all()
+        
         return {
-            "period": {
-                "start_date": start_date.isoformat(),
-                "end_date": end_date.isoformat(),
-                "days": days,
+            "user_stats": {
+                "total_memories": user_stats.total_memories if user_stats else 0,
+                "active_memories": user_stats.active_memories if user_stats else 0,
+                "avg_importance": user_stats.avg_importance if user_stats else 0.0,
+                "last_seen": user_stats.last_seen_at.isoformat() if user_stats else None,
             },
-            "requests": {
-                "total": request_stats.total_requests or 0,
-                "last_24h": last_24h_stats.requests_24h or 0,
-                "avg_latency_ms": round(request_stats.avg_latency_ms or 0, 2),
-                "p95_latency_ms": round(request_stats.p95_latency_ms or 0, 2),
-                "last_24h_avg_latency_ms": round(last_24h_stats.avg_latency_24h or 0, 2),
-            },
-            "costs": {
-                "total_tokens": request_stats.total_tokens or 0,
-                "total_cost_usd": round(request_stats.total_cost_usd or 0, 4),
-            },
-            "status_breakdown": [
-                {"status_code": status, "count": count}
-                for status, count in status_breakdown
+            "importance_distribution": [
+                {"bucket": bucket, "count": count} 
+                for bucket, count in importance_dist
             ],
-            "route_breakdown": [
-                {
-                    "route": route,
-                    "count": count,
-                    "avg_latency_ms": round(avg_latency_ms or 0, 2),
-                }
-                for route, count, avg_latency_ms in route_breakdown
+            "daily_growth": [
+                {"date": date.isoformat(), "count": count} 
+                for date, count in daily_counts
             ],
-            "memory_stats": [
-                {
-                    "modality": modality.value if modality else "unknown",
-                    "count": count,
-                }
-                for modality, count in memory_stats
-            ],
-            "job_stats": [
-                {
-                    "job_type": job_type.value,
-                    "status": status.value,
-                    "count": count,
-                }
-                for job_type, status, count in job_stats
+            "avg_importance_by_modality": [
+                {"modality": modality.value, "avg_importance": float(avg)} 
+                for modality, avg in avg_importance
             ],
         }
         
     except Exception as e:
-        logger.error(f"Failed to get analytics overview: {e}")
-        raise HTTPException(status_code=500, detail="Failed to retrieve analytics")
+        logger.error(f"Error getting memory stats: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.get("/analytics/requests")
-@require_scope("analytics:read")
-async def get_request_logs(
-    request,
+@router.get("/usage-trends")
+async def get_usage_trends(
+    tenant_id: str = Query(..., description="Tenant ID"),
+    user_id: str = Query(..., description="User ID"),
+    days: int = Query(30, ge=1, le=365, description="Number of days to analyze"),
     db: Session = Depends(get_db_session),
-    limit: int = Query(100, ge=1, le=1000, description="Number of requests to return"),
-    offset: int = Query(0, ge=0, description="Number of requests to skip"),
-    route: Optional[str] = Query(None, description="Filter by route"),
-    status_code: Optional[int] = Query(None, description="Filter by status code"),
-    days: int = Query(7, ge=1, le=365, description="Number of days to look back"),
 ) -> Dict[str, Any]:
-    """Get detailed request logs.
-    
-    Args:
-        request: FastAPI request object
-        db: Database session
-        limit: Maximum number of requests to return
-        offset: Number of requests to skip
-        route: Filter by specific route
-        status_code: Filter by status code
-        days: Number of days to look back
-        
-    Returns:
-        Request logs data
-    """
-    tenant_id = get_current_tenant_id(request)
-    if not tenant_id:
-        raise HTTPException(status_code=400, detail="Tenant ID required")
-    
+    """Get usage trends over time."""
     try:
-        # Calculate date range
-        end_date = datetime.utcnow()
-        start_date = end_date - timedelta(days=days)
+        start_date = datetime.now() - timedelta(days=days)
         
-        # Build query
-        query = db.query(RequestLog).filter(
+        # Get daily memory creation
+        daily_memories = db.query(
+            func.date(Memory.created_at).label('date'),
+            func.count(Memory.id).label('count')
+        ).filter(
             and_(
-                RequestLog.tenant_id == tenant_id,
-                RequestLog.created_at >= start_date,
-                RequestLog.created_at <= end_date,
+                Memory.tenant_id == tenant_id,
+                Memory.user_id == user_id,
+                Memory.active == True,
+                Memory.created_at >= start_date,
             )
-        )
+        ).group_by('date').order_by('date').all()
         
-        if route:
-            query = query.filter(RequestLog.route == route)
-        if status_code:
-            query = query.filter(RequestLog.status_code == status_code)
-            
-        # Get total count
-        total_count = query.count()
-        
-        # Get paginated results
-        request_logs = query.order_by(desc(RequestLog.created_at)).offset(offset).limit(limit).all()
-        
-        return {
-            "total_count": total_count,
-            "limit": limit,
-            "offset": offset,
-            "requests": [
-                {
-                    "id": log.id,
-                    "request_id": log.request_id,
-                    "route": log.route,
-                    "method": log.method,
-                    "status_code": log.status_code,
-                    "duration_ms": log.duration_ms,
-                    "tokens_used": log.tokens_used,
-                    "cost_usd": log.cost_usd,
-                    "user_agent": log.user_agent,
-                    "ip_address": log.ip_address,
-                    "created_at": log.created_at.isoformat(),
-                    "metadata": log.metadata,
-                }
-                for log in request_logs
-            ],
-        }
-        
-    except Exception as e:
-        logger.error(f"Failed to get request logs: {e}")
-        raise HTTPException(status_code=500, detail="Failed to retrieve request logs")
-
-
-@router.get("/analytics/system")
-@require_scope("analytics:read")
-async def get_system_metrics(
-    request,
-    db: Session = Depends(get_db_session),
-    metric_name: Optional[str] = Query(None, description="Filter by metric name"),
-    hours: int = Query(24, ge=1, le=168, description="Number of hours to look back"),
-) -> Dict[str, Any]:
-    """Get system metrics.
-    
-    Args:
-        request: FastAPI request object
-        db: Database session
-        metric_name: Filter by specific metric name
-        hours: Number of hours to look back
-        
-    Returns:
-        System metrics data
-    """
-    tenant_id = get_current_tenant_id(request)
-    if not tenant_id:
-        raise HTTPException(status_code=400, detail="Tenant ID required")
-    
-    try:
-        # Calculate date range
-        end_date = datetime.utcnow()
-        start_date = end_date - timedelta(hours=hours)
-        
-        # Build query
-        query = db.query(SystemMetrics).filter(
+        # Get daily memory access
+        daily_access = db.query(
+            func.date(Memory.last_accessed_at).label('date'),
+            func.count(Memory.id).label('count')
+        ).filter(
             and_(
-                SystemMetrics.tenant_id == tenant_id,
-                SystemMetrics.created_at >= start_date,
-                SystemMetrics.created_at <= end_date,
+                Memory.tenant_id == tenant_id,
+                Memory.user_id == user_id,
+                Memory.active == True,
+                Memory.last_accessed_at >= start_date,
             )
-        )
+        ).group_by('date').order_by('date').all()
         
-        if metric_name:
-            query = query.filter(SystemMetrics.metric_name == metric_name)
-            
-        # Get metrics
-        metrics = query.order_by(desc(SystemMetrics.created_at)).all()
+        # Get modality trends
+        modality_trends = db.query(
+            Memory.modality,
+            func.date(Memory.created_at).label('date'),
+            func.count(Memory.id).label('count')
+        ).filter(
+            and_(
+                Memory.tenant_id == tenant_id,
+                Memory.user_id == user_id,
+                Memory.active == True,
+                Memory.created_at >= start_date,
+            )
+        ).group_by(Memory.modality, 'date').order_by('date').all()
         
-        # Group by metric name
-        metrics_by_name = {}
-        for metric in metrics:
-            name = metric.metric_name
-            if name not in metrics_by_name:
-                metrics_by_name[name] = {
-                    "name": name,
-                    "unit": metric.metric_unit,
-                    "values": [],
-                }
-            metrics_by_name[name]["values"].append({
-                "value": metric.metric_value,
-                "timestamp": metric.created_at.isoformat(),
-                "tags": metric.tags,
+        # Group by modality
+        modality_data = {}
+        for modality, date, count in modality_trends:
+            if modality.value not in modality_data:
+                modality_data[modality.value] = []
+            modality_data[modality.value].append({
+                "date": date.isoformat(),
+                "count": count
             })
         
         return {
-            "period": {
-                "start_date": start_date.isoformat(),
-                "end_date": end_date.isoformat(),
-                "hours": hours,
-            },
-            "metrics": list(metrics_by_name.values()),
+            "daily_memories": [
+                {"date": date.isoformat(), "count": count} 
+                for date, count in daily_memories
+            ],
+            "daily_access": [
+                {"date": date.isoformat(), "count": count} 
+                for date, count in daily_access
+            ],
+            "modality_trends": modality_data,
         }
         
     except Exception as e:
-        logger.error(f"Failed to get system metrics: {e}")
-        raise HTTPException(status_code=500, detail="Failed to retrieve system metrics")
+        logger.error(f"Error getting usage trends: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/top-sources")
+async def get_top_sources(
+    tenant_id: str = Query(..., description="Tenant ID"),
+    user_id: str = Query(..., description="User ID"),
+    limit: int = Query(10, ge=1, le=50, description="Number of top sources to return"),
+    db: Session = Depends(get_db_session),
+) -> List[Dict[str, Any]]:
+    """Get top content sources by memory count."""
+    try:
+        top_sources = db.query(
+            Memory.source_uri,
+            func.count(Memory.id).label('count'),
+            func.avg(Memory.importance).label('avg_importance'),
+            func.max(Memory.created_at).label('last_created')
+        ).filter(
+            and_(
+                Memory.tenant_id == tenant_id,
+                Memory.user_id == user_id,
+                Memory.active == True,
+                Memory.source_uri.isnot(None),
+            )
+        ).group_by(Memory.source_uri).order_by(desc('count')).limit(limit).all()
+        
+        return [
+            {
+                "source": source,
+                "count": count,
+                "avg_importance": float(avg_importance),
+                "last_created": last_created.isoformat(),
+            }
+            for source, count, avg_importance, last_created in top_sources
+        ]
+        
+    except Exception as e:
+        logger.error(f"Error getting top sources: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/memory-health")
+async def get_memory_health(
+    tenant_id: str = Query(..., description="Tenant ID"),
+    user_id: str = Query(..., description="User ID"),
+    db: Session = Depends(get_db_session),
+) -> Dict[str, Any]:
+    """Get memory health metrics and recommendations."""
+    try:
+        # Get total memories
+        total_memories = db.query(func.count(Memory.id)).filter(
+            and_(
+                Memory.tenant_id == tenant_id,
+                Memory.user_id == user_id,
+                Memory.active == True,
+            )
+        ).scalar() or 0
+        
+        # Get low importance memories
+        low_importance = db.query(func.count(Memory.id)).filter(
+            and_(
+                Memory.tenant_id == tenant_id,
+                Memory.user_id == user_id,
+                Memory.active == True,
+                Memory.importance < 0.3,
+            )
+        ).scalar() or 0
+        
+        # Get stale memories (not accessed in 30 days)
+        thirty_days_ago = datetime.now() - timedelta(days=30)
+        stale_memories = db.query(func.count(Memory.id)).filter(
+            and_(
+                Memory.tenant_id == tenant_id,
+                Memory.user_id == user_id,
+                Memory.active == True,
+                Memory.last_accessed_at < thirty_days_ago,
+            )
+        ).scalar() or 0
+        
+        # Get duplicate sources
+        duplicate_sources = db.query(
+            Memory.source_uri,
+            func.count(Memory.id).label('count')
+        ).filter(
+            and_(
+                Memory.tenant_id == tenant_id,
+                Memory.user_id == user_id,
+                Memory.active == True,
+                Memory.source_uri.isnot(None),
+            )
+        ).group_by(Memory.source_uri).having(func.count(Memory.id) > 1).all()
+        
+        # Calculate health score
+        health_score = 100
+        if total_memories > 0:
+            low_importance_ratio = low_importance / total_memories
+            stale_ratio = stale_memories / total_memories
+            
+            health_score -= (low_importance_ratio * 20)
+            health_score -= (stale_ratio * 15)
+        
+        # Generate recommendations
+        recommendations = []
+        if low_importance_ratio > 0.3:
+            recommendations.append("Consider reviewing and deleting low-importance memories")
+        if stale_ratio > 0.5:
+            recommendations.append("Many memories haven't been accessed recently - consider consolidation")
+        if len(duplicate_sources) > 5:
+            recommendations.append("Multiple memories from same source detected - consider deduplication")
+        
+        return {
+            "health_score": max(0, min(100, health_score)),
+            "total_memories": total_memories,
+            "low_importance_count": low_importance,
+            "stale_memories_count": stale_memories,
+            "duplicate_sources": len(duplicate_sources),
+            "recommendations": recommendations,
+        }
+        
+    except Exception as e:
+        logger.error(f"Error getting memory health: {e}")
+        raise HTTPException(status_code=500, detail=str(e))

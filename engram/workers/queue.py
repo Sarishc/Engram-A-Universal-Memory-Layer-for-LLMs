@@ -6,7 +6,8 @@ from typing import Dict, Any, Optional, List
 from datetime import datetime, timedelta
 
 import redis
-from rq import Queue, Worker, Connection
+from rq import Queue, Worker
+from rq.connections import RedisConnection as Connection
 from rq.job import Job as RQJob
 
 from engram.utils.config import get_settings
